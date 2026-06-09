@@ -3,7 +3,6 @@ const { randomUUID } = require("crypto");
 
 const accessTtl = "15m";
 const refreshTtl = "7d";
-const refreshTtlSeconds = 7 * 24 * 60 * 60;
 
 const requireSecret = (name) => {
   if (!process.env[name]) {
@@ -31,6 +30,5 @@ module.exports = {
   signAccessToken,
   signRefreshToken,
   verifyAccessToken,
-  verifyRefreshToken,
-  refreshTtlSeconds
+  verifyRefreshToken
 };

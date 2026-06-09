@@ -1,13 +1,7 @@
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
-const { getRedis } = require("../config/redis");
 const { sendSuccess, sendError } = require("../utils/response.utils");
-const {
-  signAccessToken,
-  signRefreshToken,
-  verifyRefreshToken,
-  refreshTtlSeconds
-} = require("../utils/jwt.utils");
+const { signAccessToken, signRefreshToken, verifyRefreshToken } = require("../utils/jwt.utils");
 
 const tokenPairFor = async (user) => {
   const accessToken = signAccessToken(user);
@@ -65,19 +59,12 @@ const refresh = async (req, res, next) => {
       return sendError(res, "TOKEN_REQUIRED", "Refresh token is required", 400);
     }
 
-    const redis = getRedis();
-    const blacklisted = await redis.get(`blacklist:refresh:${refreshToken}`);
-    if (blacklisted) {
-      return sendError(res, "TOKEN_REVOKED", "Refresh token has been revoked", 401);
-    }
-
     const payload = verifyRefreshToken(refreshToken);
     const user = await User.findById(payload.sub);
     if (!user || user.refreshToken !== refreshToken) {
       return sendError(res, "INVALID_REFRESH_TOKEN", "Refresh token is invalid", 401);
     }
 
-    await redis.set(`blacklist:refresh:${refreshToken}`, "1", "EX", refreshTtlSeconds);
     const tokens = await tokenPairFor(user);
     return sendSuccess(res, { user, ...tokens }, "Token refreshed");
   } catch (error) {
@@ -92,9 +79,7 @@ const logout = async (req, res, next) => {
       return sendError(res, "TOKEN_REQUIRED", "Refresh token is required", 400);
     }
 
-    const redis = getRedis();
-    await redis.set(`blacklist:refresh:${refreshToken}`, "1", "EX", refreshTtlSeconds);
-    await User.findOneAndUpdate({ refreshToken }, { $unset: { refreshToken: "" } });
+    await User.findOneAndUpdate({ refreshToken }, { $set: { refreshToken: null } });
 
     return sendSuccess(res, {}, "Logged out successfully");
   } catch (error) {

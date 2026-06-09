@@ -6,13 +6,13 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 
 const connectDB = require("./src/config/db");
-const { connectRedis, disconnectRedis } = require("./src/config/redis");
 const authRoutes = require("./src/routes/auth.routes");
 const userRoutes = require("./src/routes/user.routes");
 const snapRoutes = require("./src/routes/snap.routes");
 const recipeRoutes = require("./src/routes/recipe.routes");
 const paymentRoutes = require("./src/routes/payment.routes");
 const { errorHandler, notFoundHandler } = require("./src/middleware/error.middleware");
+const { generalRateLimit } = require("./src/middleware/rateLimit.middleware");
 
 const app = express();
 
@@ -24,6 +24,7 @@ app.use(
   })
 );
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+app.use(generalRateLimit);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ success: true, data: { status: "ok" }, message: "SnapPlate API is healthy" });
@@ -44,7 +45,6 @@ app.use(errorHandler);
 
 const start = async () => {
   await connectDB();
-  await connectRedis();
 
   const port = process.env.PORT || 5000;
   const server = app.listen(port, () => {
@@ -54,7 +54,6 @@ const start = async () => {
   const shutdown = async (signal) => {
     console.log(`${signal} received. Shutting down gracefully.`);
     server.close(async () => {
-      await disconnectRedis();
       await require("mongoose").connection.close();
       process.exit(0);
     });
@@ -68,4 +67,3 @@ start().catch((error) => {
   console.error("Failed to start SnapPlate API", error);
   process.exit(1);
 });
-
