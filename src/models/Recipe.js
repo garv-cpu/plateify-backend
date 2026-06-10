@@ -21,6 +21,7 @@ const recipeSchema = new mongoose.Schema({
   snapId: { type: mongoose.Schema.Types.ObjectId, ref: "Snap", required: true, index: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
   dishName: { type: String, required: true, trim: true },
+  description: { type: String, trim: true, default: "" },
   cuisine: { type: String, trim: true, default: "Unknown" },
   prepTime: { type: String, trim: true, default: "Unknown" },
   cookTime: { type: String, trim: true, default: "Unknown" },
@@ -34,6 +35,7 @@ const recipeSchema = new mongoose.Schema({
     carbs: { type: String, default: "Unknown" },
     fat: { type: String, default: "Unknown" }
   },
+  confidence: { type: Number, min: 0, max: 1, default: 0 },
   tags: { type: [String], default: [] },
   isSaved: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now, index: true }

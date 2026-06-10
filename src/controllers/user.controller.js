@@ -41,7 +41,7 @@ const getMySnaps = async (req, res, next) => {
 
 const getSavedRecipes = async (req, res, next) => {
   try {
-    const recipes = await Recipe.find({ userId: req.user._id, isSaved: true }).sort({ createdAt: -1 });
+    const recipes = await Recipe.find({ userId: req.user._id, isSaved: true }).populate("snapId").sort({ createdAt: -1 });
     return sendSuccess(res, { recipes }, "Saved recipes retrieved");
   } catch (error) {
     return next(error);
@@ -57,6 +57,7 @@ const toggleSaveRecipe = async (req, res, next) => {
 
     recipe.isSaved = !recipe.isSaved;
     await recipe.save();
+    await recipe.populate("snapId");
 
     return sendSuccess(res, { recipe }, recipe.isSaved ? "Recipe saved" : "Recipe unsaved");
   } catch (error) {

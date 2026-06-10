@@ -1,7 +1,7 @@
 const Snap = require("../models/Snap");
 const Recipe = require("../models/Recipe");
 const { uploadImage } = require("../services/cloudinary.service");
-const { generateRecipeFromImage } = require("../services/gemini.service");
+const { analyzeMealImage, mapMealAnalysisToRecipe } = require("../services/gemini.service");
 const { canCreateSnap, hasActiveProPlan } = require("../utils/credits.utils");
 const { sendSuccess, sendError } = require("../utils/response.utils");
 
@@ -12,7 +12,11 @@ const createSnap = async (req, res, next) => {
       return sendError(res, "NO_CREDITS", "Buy snaps or subscribe", 402);
     }
 
+    console.log("[Snap] Create snap requested", { userId: user._id.toString(), fileSize: req.file.size, mimeType: req.file.mimetype });
+
     const uploaded = await uploadImage({ file: req.file, userId: user._id.toString() });
+    console.log("[Snap] Image uploaded to Cloudinary", { userId: user._id.toString(), publicId: uploaded.publicId });
+
     const creditsUsed = hasActiveProPlan(user) ? 0 : 1;
 
     if (creditsUsed === 1) {
@@ -29,13 +33,19 @@ const createSnap = async (req, res, next) => {
       creditsUsed
     });
 
-    const generated = await generateRecipeFromImage(uploaded.url);
-    if (!generated) {
+    const mealAnalysis = await analyzeMealImage(uploaded.url);
+    if (!mealAnalysis) {
       snap.status = "failed";
       await snap.save();
+      if (creditsUsed === 1) {
+        user.snapCredits += 1;
+        await user.save();
+      }
+      console.error("[Snap] Gemini meal analysis failed", { snapId: snap._id.toString(), userId: user._id.toString() });
       return sendError(res, "RECIPE_GENERATION_FAILED", "Could not generate a recipe from this image", 422);
     }
 
+    const generated = mapMealAnalysisToRecipe(mealAnalysis);
     const recipe = await Recipe.create({
       ...generated,
       snapId: snap._id,
@@ -49,7 +59,14 @@ const createSnap = async (req, res, next) => {
     user.totalSnapsUsed += 1;
     await user.save();
 
-    return sendSuccess(res, { snap, recipe }, "Recipe generated successfully", 201);
+    console.log("[Snap] Recipe generated successfully", {
+      snapId: snap._id.toString(),
+      recipeId: recipe._id.toString(),
+      mealName: mealAnalysis.mealName,
+      confidence: mealAnalysis.confidence
+    });
+
+    return sendSuccess(res, { snap, recipe, mealAnalysis }, "Recipe generated successfully", 201);
   } catch (error) {
     return next(error);
   }
