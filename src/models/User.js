@@ -9,6 +9,10 @@ const userSchema = new mongoose.Schema(
     plan: { type: String, enum: ["free", "pay_per_snap", "pro"], default: "free" },
     snapCredits: { type: Number, default: 3, min: 0 },
     totalSnapsUsed: { type: Number, default: 0, min: 0 },
+    currentStreak: { type: Number, default: 0, min: 0 },
+    longestStreak: { type: Number, default: 0, min: 0 },
+    lastSnapDate: { type: Date, default: null },
+    achievements: { type: [String], default: [] },
     subscriptionExpiresAt: { type: Date, default: null },
     razorpayCustomerId: { type: String },
     refreshToken: { type: String }

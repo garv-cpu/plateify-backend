@@ -5,6 +5,48 @@ const { analyzeMealImage, mapMealAnalysisToRecipe } = require("../services/gemin
 const { canCreateSnap, hasActiveProPlan } = require("../utils/credits.utils");
 const { sendSuccess, sendError } = require("../utils/response.utils");
 
+const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const daysBetween = (earlier, later) => Math.round((startOfDay(later) - startOfDay(earlier)) / 86400000);
+
+const updateSnapStreak = (user) => {
+  const now = new Date();
+  let currentStreak = user.currentStreak || 0;
+
+  if (!user.lastSnapDate) {
+    currentStreak = 1;
+  } else {
+    const diff = daysBetween(user.lastSnapDate, now);
+    if (diff === 1) currentStreak += 1;
+    if (diff > 1) currentStreak = 1;
+  }
+
+  user.currentStreak = currentStreak;
+  user.longestStreak = Math.max(user.longestStreak || 0, currentStreak);
+  user.lastSnapDate = now;
+
+  const achievements = new Set(user.achievements || []);
+  if (user.totalSnapsUsed + 1 >= 1) achievements.add("first_snap");
+  if (user.totalSnapsUsed + 1 >= 10) achievements.add("ten_snaps");
+  if (user.totalSnapsUsed + 1 >= 25) achievements.add("twenty_five_snaps");
+  if (currentStreak >= 7) achievements.add("seven_day_streak");
+  user.achievements = Array.from(achievements);
+
+  let milestone = null;
+  if (currentStreak === 3) milestone = "three_day_streak";
+  if (currentStreak === 7) {
+    milestone = "seven_day_streak";
+    user.snapCredits += 2;
+  }
+  if (currentStreak === 30) {
+    milestone = "thirty_day_streak";
+    user.plan = "pro";
+    achievements.add("plateify_legend");
+    user.achievements = Array.from(achievements);
+  }
+
+  return { currentStreak: user.currentStreak, longestStreak: user.longestStreak, milestone };
+};
+
 const createSnap = async (req, res, next) => {
   try {
     const user = req.user;
@@ -14,6 +56,7 @@ const createSnap = async (req, res, next) => {
 
     console.log("[Snap] Create snap requested", { userId: user._id.toString(), fileSize: req.file.size, mimeType: req.file.mimetype });
 
+    const isPublic = req.body.isPublic === undefined ? true : String(req.body.isPublic) === "true";
     const uploaded = await uploadImage({ file: req.file, userId: user._id.toString() });
     console.log("[Snap] Image uploaded to Cloudinary", { userId: user._id.toString(), publicId: uploaded.publicId });
 
@@ -30,6 +73,7 @@ const createSnap = async (req, res, next) => {
       imageUrl: uploaded.url,
       imagePublicId: uploaded.publicId,
       status: "processing",
+      isPublic,
       creditsUsed
     });
 
@@ -56,6 +100,7 @@ const createSnap = async (req, res, next) => {
     snap.recipeId = recipe._id;
     await snap.save();
 
+    const streak = updateSnapStreak(user);
     user.totalSnapsUsed += 1;
     await user.save();
 
@@ -66,7 +111,7 @@ const createSnap = async (req, res, next) => {
       confidence: mealAnalysis.confidence
     });
 
-    return sendSuccess(res, { snap, recipe, mealAnalysis }, "Recipe generated successfully", 201);
+    return sendSuccess(res, { snap, recipe, mealAnalysis, user, streak }, "Recipe generated successfully", 201);
   } catch (error) {
     return next(error);
   }
@@ -85,4 +130,24 @@ const getSnap = async (req, res, next) => {
   }
 };
 
-module.exports = { createSnap, getSnap };
+const updatePrivacy = async (req, res, next) => {
+  try {
+    const { isPublic } = req.body;
+    if (typeof isPublic !== "boolean") {
+      return sendError(res, "VALIDATION_ERROR", "isPublic boolean is required", 400);
+    }
+
+    const snap = await Snap.findOneAndUpdate(
+      { _id: req.params.snapId, userId: req.user._id },
+      { isPublic },
+      { new: true }
+    ).populate("recipeId");
+
+    if (!snap) return sendError(res, "SNAP_NOT_FOUND", "Snap was not found", 404);
+    return sendSuccess(res, { snap }, "Snap privacy updated");
+  } catch (error) {
+    return next(error);
+  }
+};
+
+module.exports = { createSnap, getSnap, updatePrivacy };

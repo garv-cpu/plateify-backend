@@ -36,6 +36,25 @@ const recipeSchema = new mongoose.Schema({
     fat: { type: String, default: "Unknown" }
   },
   confidence: { type: Number, min: 0, max: 1, default: 0 },
+  isRemixed: { type: Boolean, default: false },
+  remixType: { type: String, trim: true },
+  originalRecipeId: { type: mongoose.Schema.Types.ObjectId, ref: "Recipe" },
+  remixLinks: [
+    {
+      remixType: { type: String, trim: true },
+      recipeId: { type: mongoose.Schema.Types.ObjectId, ref: "Recipe" }
+    }
+  ],
+  swapHistory: [
+    {
+      ingredientIndex: { type: Number, required: true },
+      original: { type: String, required: true },
+      replacement: { type: String, required: true },
+      reason: { type: String, default: "" },
+      changedSteps: { type: [Number], default: [] },
+      createdAt: { type: Date, default: Date.now }
+    }
+  ],
   tags: { type: [String], default: [] },
   isSaved: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now, index: true }

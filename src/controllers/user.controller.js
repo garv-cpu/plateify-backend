@@ -65,4 +65,12 @@ const toggleSaveRecipe = async (req, res, next) => {
   }
 };
 
-module.exports = { getMe, updateMe, getMySnaps, getSavedRecipes, toggleSaveRecipe };
+const getAchievements = async (req, res, next) => {
+  try {
+    return sendSuccess(res, { achievements: req.user.achievements || [] }, "Achievements retrieved");
+  } catch (error) {
+    return next(error);
+  }
+};
+
+module.exports = { getMe, updateMe, getMySnaps, getSavedRecipes, toggleSaveRecipe, getAchievements };

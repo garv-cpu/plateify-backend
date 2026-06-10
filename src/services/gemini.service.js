@@ -185,16 +185,120 @@ const mapMealAnalysisToRecipe = (analysis) => ({
   tags: [analysis.cuisine, analysis.difficulty].filter(Boolean)
 });
 
+const createJsonModel = () =>
+  getGeminiModel({
+    temperature: 0.25,
+    topP: 0.85,
+    topK: 32,
+    responseMimeType: "application/json"
+  });
+
+const generateIngredientSwap = async ({ recipe, ingredientIndex, newIngredient, reason }) => {
+  const ingredient = recipe.ingredients[ingredientIndex];
+  if (!ingredient) {
+    throw new Error("Ingredient index is out of range");
+  }
+
+  const oldIngredient = ingredient.name;
+  const affectedSteps = recipe.steps.filter((step) =>
+    step.instruction.toLowerCase().includes(oldIngredient.toLowerCase().split(" ")[0])
+  );
+  const stepsToRewrite = affectedSteps.length ? affectedSteps : recipe.steps;
+  const model = createJsonModel();
+  const swapPrompt = `You are a professional chef updating only affected recipe steps.
+Return ONLY valid JSON:
+{
+  "updatedIngredient": { "name": "string", "quantity": "string", "unit": "string" },
+  "updatedSteps": [{ "stepNumber": 1, "instruction": "string" }]
+}
+
+Recipe: ${recipe.dishName}
+Original ingredient: ${oldIngredient}
+Replacement ingredient: ${newIngredient}
+Reason: ${reason || "Not provided"}
+Current steps to revise:
+${stepsToRewrite.map((step) => `${step.stepNumber}. ${step.instruction}`).join("\n")}
+
+Rules:
+- Rewrite only the listed steps.
+- Keep stepNumber values unchanged.
+- Adapt cooking technique if needed for the replacement.
+- Do not alter unrelated steps.`;
+
+  for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      console.log("[Gemini] Ingredient swap request", { recipeId: recipe._id.toString(), ingredientIndex, attempt });
+      const result = await model.generateContent(swapPrompt);
+      const json = extractJson(result.response.text());
+      const updatedSteps = Array.isArray(json.updatedSteps)
+        ? json.updatedSteps
+            .map((step) => ({
+              stepNumber: toPositiveInt(step.stepNumber, 0),
+              instruction: String(step.instruction || "").trim()
+            }))
+            .filter((step) => step.stepNumber > 0 && step.instruction)
+        : [];
+
+      if (!json.updatedIngredient || !json.updatedIngredient.name || updatedSteps.length === 0) {
+        throw new Error("Gemini swap response failed validation");
+      }
+
+      return {
+        updatedIngredient: {
+          name: String(json.updatedIngredient.name).trim(),
+          quantity: String(json.updatedIngredient.quantity || ingredient.quantity || "As needed").trim(),
+          unit: String(json.updatedIngredient.unit || ingredient.unit || "").trim()
+        },
+        updatedSteps
+      };
+    } catch (error) {
+      console.error("[Gemini] Ingredient swap attempt failed", { attempt, message: error.message });
+      if (attempt < GEMINI_MAX_ATTEMPTS) await delay(300 * attempt);
+    }
+  }
+
+  return null;
+};
+
+const remixRecipe = async ({ recipe, remixType }) => {
+  const model = createJsonModel();
+  const remixPrompt = `${prompt}
+
+Remix this existing recipe into a ${remixType} version.
+Existing recipe:
+${JSON.stringify({
+  mealName: recipe.dishName,
+  cuisine: recipe.cuisine,
+  description: recipe.description,
+  ingredients: recipe.ingredients.map((item) => `${item.name} ${item.quantity || ""} ${item.unit || ""}`.trim()),
+  recipe: recipe.steps.map((step) => step.instruction),
+  nutrition: recipe.nutritionEstimate,
+  cookingTime: recipe.cookTime,
+  servingSize: recipe.servings,
+  difficulty: recipe.difficulty
+})}
+
+Return the same required JSON shape. Make the recipe genuinely match the ${remixType} constraint.`;
+
+  for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      console.log("[Gemini] Recipe remix request", { recipeId: recipe._id.toString(), remixType, attempt });
+      const result = await model.generateContent(remixPrompt);
+      return validateMealAnalysis(extractJson(result.response.text()));
+    } catch (error) {
+      console.error("[Gemini] Recipe remix attempt failed", { attempt, message: error.message });
+      if (attempt < GEMINI_MAX_ATTEMPTS) await delay(300 * attempt);
+    }
+  }
+
+  return null;
+};
+
 const analyzeMealImage = async (imageUrl) => {
   const startedAt = Date.now();
   console.log("[Gemini] Meal image analysis started", { imageUrl });
 
-  const model = getGeminiModel({
-    temperature: 0.2,
-    topP: 0.8,
-    topK: 32,
-    responseMimeType: "application/json"
-  });
+  const model = createJsonModel();
   const imagePart = await imageUrlToInlineData(imageUrl);
 
   for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
@@ -237,4 +341,10 @@ const generateRecipeFromImage = async (imageUrl) => {
   return analysis ? mapMealAnalysisToRecipe(analysis) : null;
 };
 
-module.exports = { analyzeMealImage, generateRecipeFromImage, mapMealAnalysisToRecipe };
+module.exports = {
+  analyzeMealImage,
+  generateRecipeFromImage,
+  mapMealAnalysisToRecipe,
+  generateIngredientSwap,
+  remixRecipe
+};

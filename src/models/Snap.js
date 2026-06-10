@@ -6,6 +6,7 @@ const snapSchema = new mongoose.Schema({
   imagePublicId: { type: String },
   status: { type: String, enum: ["processing", "done", "failed"], default: "processing", index: true },
   recipeId: { type: mongoose.Schema.Types.ObjectId, ref: "Recipe" },
+  isPublic: { type: Boolean, default: true, index: true },
   creditsUsed: { type: Number, default: 1, min: 0 },
   createdAt: { type: Date, default: Date.now, index: true }
 });
