@@ -1,7 +1,7 @@
 const Snap = require("../models/Snap");
 const Recipe = require("../models/Recipe");
 const { uploadImage } = require("../services/cloudinary.service");
-const { analyzeMealImage, mapMealAnalysisToRecipe } = require("../services/gemini.service");
+const { analyzeMealImage, getLastMealAnalysisError, mapMealAnalysisToRecipe } = require("../services/gemini.service");
 const { canCreateSnap, hasActiveProPlan } = require("../utils/credits.utils");
 const { sendSuccess, sendError } = require("../utils/response.utils");
 
@@ -57,7 +57,13 @@ const createSnap = async (req, res, next) => {
     console.log("[Snap] Create snap requested", { userId: user._id.toString(), fileSize: req.file.size, mimeType: req.file.mimetype });
 
     const isPublic = req.body.isPublic === undefined ? true : String(req.body.isPublic) === "true";
-    const uploaded = await uploadImage({ file: req.file, userId: user._id.toString() });
+    let uploaded;
+    try {
+      uploaded = await uploadImage({ file: req.file, userId: user._id.toString() });
+    } catch (error) {
+      console.error("[Snap] Cloudinary upload failed", { userId: user._id.toString(), message: error.message });
+      return sendError(res, "CLOUDINARY_UPLOAD_FAILED", "Cloudinary upload failed. Check backend Cloudinary configuration.", 502);
+    }
     console.log("[Snap] Image uploaded to Cloudinary", { userId: user._id.toString(), publicId: uploaded.publicId });
 
     const creditsUsed = hasActiveProPlan(user) ? 0 : 1;
@@ -86,7 +92,12 @@ const createSnap = async (req, res, next) => {
         await user.save();
       }
       console.error("[Snap] Gemini meal analysis failed", { snapId: snap._id.toString(), userId: user._id.toString() });
-      return sendError(res, "RECIPE_GENERATION_FAILED", "Could not generate a recipe from this image", 422);
+      const geminiError = getLastMealAnalysisError();
+      if (geminiError) {
+        const status = geminiError.code === "GEMINI_CONFIG_ERROR" ? 500 : 502;
+        return sendError(res, geminiError.code, geminiError.message, status);
+      }
+      return sendError(res, "RECIPE_GENERATION_FAILED", "Gemini could not generate a valid recipe from this image.", 422);
     }
 
     const generated = mapMealAnalysisToRecipe(mealAnalysis);

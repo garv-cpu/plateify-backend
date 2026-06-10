@@ -2,6 +2,7 @@ const { getGeminiModel } = require("../config/gemini");
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const GEMINI_MAX_ATTEMPTS = 3;
+let lastMealAnalysisError = null;
 
 const prompt = `You are Plateify's senior food recognition and recipe generation system.
 Analyze the provided food image directly using multimodal visual understanding.
@@ -127,7 +128,7 @@ const validateMealAnalysis = (analysis) => {
 
 const imageUrlToInlineData = async (imageUrl) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), 30000);
   const response = await fetch(imageUrl, { signal: controller.signal });
   clearTimeout(timeout);
 
@@ -296,10 +297,25 @@ Return the same required JSON shape. Make the recipe genuinely match the ${remix
 
 const analyzeMealImage = async (imageUrl) => {
   const startedAt = Date.now();
+  lastMealAnalysisError = null;
   console.log("[Gemini] Meal image analysis started", { imageUrl });
 
-  const model = createJsonModel();
-  const imagePart = await imageUrlToInlineData(imageUrl);
+  let model;
+  let imagePart;
+  try {
+    model = createJsonModel();
+    imagePart = await imageUrlToInlineData(imageUrl);
+  } catch (error) {
+    lastMealAnalysisError = {
+      code: error.message.includes("GEMINI_API_KEY") ? "GEMINI_CONFIG_ERROR" : "GEMINI_IMAGE_DOWNLOAD_FAILED",
+      message: error.message
+    };
+    console.error("[Gemini] Meal image setup failed", {
+      durationMs: Date.now() - startedAt,
+      message: error.message
+    });
+    return null;
+  }
 
   for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
     try {
@@ -317,6 +333,7 @@ const analyzeMealImage = async (imageUrl) => {
 
       return analysis;
     } catch (error) {
+      lastMealAnalysisError = { code: "GEMINI_API_FAILED", message: error.message };
       console.error("[Gemini] Meal image analysis attempt failed", {
         attempt,
         durationMs: Date.now() - startedAt,
@@ -336,6 +353,8 @@ const analyzeMealImage = async (imageUrl) => {
   return null;
 };
 
+const getLastMealAnalysisError = () => lastMealAnalysisError;
+
 const generateRecipeFromImage = async (imageUrl) => {
   const analysis = await analyzeMealImage(imageUrl);
   return analysis ? mapMealAnalysisToRecipe(analysis) : null;
@@ -346,5 +365,6 @@ module.exports = {
   generateRecipeFromImage,
   mapMealAnalysisToRecipe,
   generateIngredientSwap,
-  remixRecipe
+  remixRecipe,
+  getLastMealAnalysisError
 };

@@ -29,6 +29,9 @@ app.use(generalRateLimit);
 app.get("/health", (req, res) => {
   res.status(200).json({ success: true, data: { status: "ok" }, message: "SnapPlate API is healthy" });
 });
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ success: true, data: { status: "ok" }, message: "Plateify API is healthy" });
+});
 
 app.use("/api/payment/webhook", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: "1mb" }));
