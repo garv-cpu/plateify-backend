@@ -1,7 +1,7 @@
 const Recipe = require("../models/Recipe");
 const Snap = require("../models/Snap");
 const User = require("../models/User");
-const { generateIngredientSwap, mapMealAnalysisToRecipe, remixRecipe } = require("../services/gemini.service");
+const { generateIngredientSwap, mapMealAnalysisToRecipe, remixRecipe } = require("../services/openai.service");
 const { sendSuccess, sendError } = require("../utils/response.utils");
 
 const getRecipe = async (req, res, next) => {

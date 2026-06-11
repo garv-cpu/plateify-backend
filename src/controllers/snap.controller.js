@@ -1,7 +1,7 @@
 const Snap = require("../models/Snap");
 const Recipe = require("../models/Recipe");
 const { uploadImage } = require("../services/cloudinary.service");
-const { analyzeMealImage, getLastMealAnalysisError, mapMealAnalysisToRecipe } = require("../services/gemini.service");
+const { analyzeMealImage, generateRecipe, getLastMealAnalysisError, mapMealAnalysisToRecipe } = require("../services/openai.service");
 const { canCreateSnap, hasActiveProPlan } = require("../utils/credits.utils");
 const { sendSuccess, sendError } = require("../utils/response.utils");
 
@@ -91,16 +91,41 @@ const createSnap = async (req, res, next) => {
         user.snapCredits += 1;
         await user.save();
       }
-      console.error("[Snap] Gemini meal analysis failed", { snapId: snap._id.toString(), userId: user._id.toString() });
-      const geminiError = getLastMealAnalysisError();
-      if (geminiError) {
-        const status = geminiError.code === "GEMINI_CONFIG_ERROR" ? 500 : 502;
-        return sendError(res, geminiError.code, geminiError.message, status);
+      console.error("[Snap] OpenAI meal analysis failed", { snapId: snap._id.toString(), userId: user._id.toString() });
+      const openAIError = getLastMealAnalysisError();
+      if (openAIError) {
+        const status = openAIError.statusCode || (openAIError.code === "OPENAI_CONFIG_ERROR" ? 500 : openAIError.code === "OPENAI_QUOTA_EXCEEDED" ? 429 : 502);
+        return sendError(res, openAIError.code, openAIError.message, status);
       }
-      return sendError(res, "RECIPE_GENERATION_FAILED", "Gemini could not generate a valid recipe from this image.", 422);
+      return sendError(res, "RECIPE_GENERATION_FAILED", "OpenAI could not analyze this image.", 422);
     }
 
-    const generated = mapMealAnalysisToRecipe(mealAnalysis);
+    let generatedRecipe;
+    try {
+      generatedRecipe = await generateRecipe(mealAnalysis);
+    } catch (error) {
+      snap.status = "failed";
+      await snap.save();
+      if (creditsUsed === 1) {
+        user.snapCredits += 1;
+        await user.save();
+      }
+      console.error("[Snap] OpenAI recipe generation failed", {
+        snapId: snap._id.toString(),
+        userId: user._id.toString(),
+        message: error.message
+      });
+      return sendError(res, error.code || "OPENAI_RECIPE_FAILED", error.message || "OpenAI could not generate a recipe.", error.statusCode || 502);
+    }
+
+    const enrichedMealAnalysis = {
+      ...mealAnalysis,
+      recipe: generatedRecipe.steps,
+      cookingTime: generatedRecipe.cookTime,
+      servingSize: Number.parseInt(generatedRecipe.servings, 10) || 1,
+      difficulty: generatedRecipe.difficulty
+    };
+    const generated = mapMealAnalysisToRecipe(mealAnalysis, generatedRecipe);
     const recipe = await Recipe.create({
       ...generated,
       snapId: snap._id,
@@ -118,11 +143,11 @@ const createSnap = async (req, res, next) => {
     console.log("[Snap] Recipe generated successfully", {
       snapId: snap._id.toString(),
       recipeId: recipe._id.toString(),
-      mealName: mealAnalysis.mealName,
-      confidence: mealAnalysis.confidence
+      mealName: enrichedMealAnalysis.mealName,
+      confidence: enrichedMealAnalysis.confidence
     });
 
-    return sendSuccess(res, { snap, recipe, mealAnalysis, user, streak }, "Recipe generated successfully", 201);
+    return sendSuccess(res, { snap, recipe, mealAnalysis: enrichedMealAnalysis, user, streak }, "Recipe generated successfully", 201);
   } catch (error) {
     return next(error);
   }
